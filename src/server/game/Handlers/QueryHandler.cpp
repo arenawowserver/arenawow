@@ -49,6 +49,7 @@ void WorldSession::SendNameQueryOpcode(uint64 guid)
     data << nameData->m_name;                       // played name
     data << uint8(0);                               // realm name - only set for cross realm interaction (such as Battlegrounds)
     data << uint8(nameData->m_race);
+	data << uint8(player ? player->GetFakeRaceOrRace() : nameData->m_race);
     data << uint8(nameData->m_gender);
     data << uint8(nameData->m_class);
 
@@ -62,6 +63,9 @@ void WorldSession::SendNameQueryOpcode(uint64 guid)
         data << uint8(0);                           // Name is not declined
 
     SendPacket(&data);
+
+    if (player && player->GetFakeRaceOrRace() != player->getRace())
+        GetPlayer()->AddPlayerToFakeList(player->GetGUID());
 }
 
 void WorldSession::HandleNameQueryOpcode(WorldPacket& recvData)

@@ -1065,6 +1065,22 @@ class Player : public Unit, public GridObject<Player>
         explicit Player (WorldSession* session);
         ~Player();
 
+        bool m_ClearFakePlayerlist;
+        bool m_ForgetPlayersInBG;
+        uint16 m_ClearFakePlayerlist_timer;
+        uint16 m_ForgetPlayersInBG_timer;
+
+        void FitPlayerInTeam(bool action);
+        void ClearFakePlayerlist();
+        void DelayedClearFakePlayerlist() { m_ClearFakePlayerlist = true; }
+        void ForgetPlayersInBG(Battleground* pBattleGround);
+        void DelayedForgetPlayersInBG() { m_ForgetPlayersInBG = true; }
+        uint8 GetFakeRaceOrRace();
+        void DoTimedStuff(uint32 update_diff);
+
+        std::vector<uint64> m_FakePlayers;
+        void AddPlayerToFakeList(uint64 guid);
+
         void CleanupsBeforeDelete(bool finalCleanup = true);
 
         void AddToWorld();
@@ -2013,6 +2029,7 @@ class Player : public Unit, public GridObject<Player>
         static uint32 TeamForRace(uint8 race);
         uint32 GetTeam() const { return m_team; }
         TeamId GetTeamId() const { return m_team == ALLIANCE ? TEAM_ALLIANCE : TEAM_HORDE; }
+		TeamId GetBGTeamId() const { return GetBGTeam() == ALLIANCE ? TEAM_ALLIANCE : TEAM_HORDE; }
         void setFactionForRace(uint8 race);
 
         void InitDisplayIds();

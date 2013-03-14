@@ -651,6 +651,11 @@ Player::Player(WorldSession* session): Unit(true)
 #pragma warning(default:4355)
 #endif
 
+    m_ClearFakePlayerlist = false;
+    m_ForgetPlayersInBG = false;
+    m_ClearFakePlayerlist_timer = 0;
+    m_ForgetPlayersInBG_timer = 0;
+
     m_speakTime = 0;
     m_speakCount = 0;
 
@@ -1518,6 +1523,8 @@ void Player::Update(uint32 p_time)
 {
     if (!IsInWorld())
         return;
+
+	DoTimedStuff(p_time);
 
     // undelivered mail
     if (m_nextMailDelivereTime && m_nextMailDelivereTime <= time(NULL))
@@ -25858,4 +25865,210 @@ Pet* Player::SummonPet(uint32 entry, float x, float y, float z, float ang, PetTy
     //ObjectAccessor::UpdateObjectVisibility(pet);
 
     return pet;
+}
+
+void Player::FitPlayerInTeam(bool action)
+{
+    if(InBattleground() && GetBGTeam() != 0 && GetBGTeam() != GetTeam() && action)
+    {
+        ChrRacesEntry const* rEntry = sChrRacesStore.LookupEntry(GetFakeRaceOrRace());
+        setFaction(rEntry ? rEntry->FactionID : getFaction());
+        DelayedForgetPlayersInBG();
+    }
+    else if (!action)
+    {
+        setFactionForRace(getRace());
+        DelayedClearFakePlayerlist();
+    }
+}
+
+uint8 Player::GetFakeRaceOrRace()
+{
+    if(InBattleground() && GetBGTeam() != 0 && GetBGTeam() != GetTeam())
+        return GetBGTeam() == ALLIANCE ? RACE_HUMAN : RACE_BLOODELF;
+    else
+        return getRace();
+}
+
+void Player::ClearFakePlayerlist()
+{
+    if (m_FakePlayers.empty())
+        return;
+    else if (!IsInMap(this))
+        return;
+
+    for (std::vector<uint64>::iterator iter = m_FakePlayers.begin(); iter != m_FakePlayers.end(); ++iter)
+    {
+        WorldPacket data(SMSG_INVALIDATE_PLAYER, 8);
+        data << *iter;
+        GetSession()->SendPacket(&data);
+    }
+    m_FakePlayers.clear();
+}
+
+void Player::AddPlayerToFakeList(uint64 guid)
+{
+    if (!guid)
+        return;
+
+    m_FakePlayers.push_back(guid);
+}
+
+void Player::ForgetPlayersInBG(Battleground* pBattleGround)
+{
+    if (!pBattleGround || pBattleGround->isArena())
+        return;
+
+    for (Battleground::BattlegroundPlayerMap::const_iterator itr = pBattleGround->GetPlayers().begin(); itr != pBattleGround->GetPlayers().end(); ++itr)
+    {
+        if (Player* pPlayer = ObjectAccessor::FindPlayer(itr->first))
+        {
+            WorldPacket data1(SMSG_INVALIDATE_PLAYER, 8);
+            data1 << pPlayer->GetGUID();
+            GetSession()->SendPacket(&data1);
+
+            WorldPacket data2(SMSG_INVALIDATE_PLAYER, 8);
+            data2 << GetGUID();
+            pPlayer->GetSession()->SendPacket(&data2);
+        }
+    }
+}
+
+void Player::DoTimedStuff(uint32 update_diff)
+{
+    if (!IsInMap(this) || IsBeingTeleported())
+    {
+        m_ClearFakePlayerlist_timer = 0;
+        m_ForgetPlayersInBG_timer = 0;
+    }
+    else if (m_ClearFakePlayerlist)
+    {
+        m_ClearFakePlayerlist_timer += update_diff;
+        if (m_ClearFakePlayerlist_timer >= 5*IN_MILLISECONDS)
+        {
+            m_ClearFakePlayerlist_timer = 0;
+            m_ClearFakePlayerlist = false;
+            ClearFakePlayerlist();
+        }
+    }
+    else if (m_ForgetPlayersInBG)
+    {
+        m_ForgetPlayersInBG_timer += update_diff;
+        if (m_ForgetPlayersInBG_timer >= 5*IN_MILLISECONDS)
+        {
+            m_ForgetPlayersInBG_timer = 0;
+            m_ForgetPlayersInBG = false;
+            if (Battleground* pBattleGround = GetBattleground())
+                ForgetPlayersInBG(pBattleGround);
+        }
+    }
+}
+
+bool BattlegroundQueue::CheckCrossFactionMatch(BattlegroundBracketId bracket_id, uint32 MinPlayersPerTeam, uint32 MaxPlayersPerTeam)
+{
+    if (m_SelectionPools[TEAM_ALLIANCE].GetPlayerCount() < MinPlayersPerTeam && m_SelectionPools[TEAM_HORDE].GetPlayerCount() < MinPlayersPerTeam)
+        return false;
+
+    uint32 teamIdx = TEAM_ALLIANCE;
+    uint32 otherTeamIdx = TEAM_HORDE;
+    Team otherTeamId = HORDE;
+    if (m_SelectionPools[TEAM_HORDE].GetPlayerCount() >= MinPlayersPerTeam)
+    {
+        teamIdx = TEAM_HORDE;
+        otherTeamIdx = TEAM_ALLIANCE;
+        otherTeamId = ALLIANCE;
+    }
+    // clear other team's selection
+    m_SelectionPools[otherTeamIdx].Init();
+    // store last ginfo pointer
+    GroupQueueInfo* ginfo = m_SelectionPools[teamIdx].SelectedGroups.back();
+    // set itr_team to group that was added to selection pool latest
+    GroupsQueueType::iterator itr_team = m_QueuedGroups[bracket_id][BG_QUEUE_NORMAL_ALLIANCE + teamIdx].begin();
+    for (; itr_team != m_QueuedGroups[bracket_id][BG_QUEUE_NORMAL_ALLIANCE + teamIdx].end(); ++itr_team)
+        if (ginfo == *itr_team)
+            break;
+    if (itr_team == m_QueuedGroups[bracket_id][BG_QUEUE_NORMAL_ALLIANCE + teamIdx].end())
+        return false;
+
+    GroupsQueueType::iterator itr_team2 = itr_team;
+    ++itr_team2;
+    // invite players to other selection pool
+    for (; itr_team2 != m_QueuedGroups[bracket_id][BG_QUEUE_NORMAL_ALLIANCE + teamIdx].end(); ++itr_team2)
+    {
+        // if selection pool is full then break;
+        if (!(*itr_team2)->IsInvitedToBGInstanceGUID)
+        {
+            m_SelectionPools[otherTeamIdx].AddGroup(*itr_team2, MaxPlayersPerTeam);
+            if (m_SelectionPools[otherTeamIdx].GetPlayerCount() >= MinPlayersPerTeam)
+                break;
+        }
+    }
+    if (m_SelectionPools[otherTeamIdx].GetPlayerCount() < MinPlayersPerTeam)
+        return false;
+
+    // here we have correct 2 selections and we need to change one teams team and move selection pool teams to other team's queue
+    for (GroupsQueueType::iterator itr = m_SelectionPools[otherTeamIdx].SelectedGroups.begin(); itr != m_SelectionPools[otherTeamIdx].SelectedGroups.end(); ++itr)
+    {
+        // set correct team
+        (*itr)->Team = otherTeamId;
+        // add team to other queue
+        m_QueuedGroups[bracket_id][BG_QUEUE_NORMAL_ALLIANCE + otherTeamIdx].push_front(*itr);
+        // remove team from old queue
+        GroupsQueueType::iterator itr2 = itr_team;
+        ++itr2;
+        for (; itr2 != m_QueuedGroups[bracket_id][BG_QUEUE_NORMAL_ALLIANCE + teamIdx].end(); ++itr2)
+        {
+            if (*itr2 == *itr)
+            {
+                m_QueuedGroups[bracket_id][BG_QUEUE_NORMAL_ALLIANCE + teamIdx].erase(itr2);
+                break;
+            }
+        }
+    }
+    return true;
+}
+
+// This function will invite players in the least populated faction, which makes battleground queues much faster.
+// This function will return true if cross faction battlegrounds are enabled, otherwise return false,
+// which is useful in FillPlayersToBG. Because then we can interrupt the regular invitation if cross faction bg's are enabled.
+bool BattlegroundQueue::FillXPlayersToBG(BattlegroundBracketId bracket_id, int32 aliFree, int32 hordeFree)
+{
+    if (sWorld->getBoolConfig(CONFIG_CROSSFACTION_ENABLED))
+    {
+        int32 valiFree = aliFree;
+        int32 vhordeFree = hordeFree;
+        int32 diff = 0;
+        GroupsQueueType queuedGroups;
+        sLog->outDebug(LOG_FILTER_BATTLEGROUND, "valiFree: %u vhordeFree: %u", valiFree, vhordeFree);
+
+        for (uint8 i = 0; i < 2; ++i)
+            for (GroupsQueueType::iterator itr = m_QueuedGroups[bracket_id][BG_QUEUE_NORMAL_ALLIANCE + i].begin(); itr != m_QueuedGroups[bracket_id][BG_QUEUE_NORMAL_ALLIANCE + i].end(); ++itr)
+                queuedGroups.push_back(*itr);
+
+        sLog->outDebug(LOG_FILTER_BATTLEGROUND, "queuedGroups.size(): %u", queuedGroups.size());
+
+        for (GroupsQueueType::const_iterator itr = queuedGroups.begin(); itr != queuedGroups.end(); ++itr)
+        {
+            diff = abs(valiFree - vhordeFree);
+            bool moreAli = valiFree > vhordeFree;
+
+            sLog->outDebug(LOG_FILTER_BATTLEGROUND, "moreAli: %s", moreAli ? "true" : "false");
+            sLog->outDebug(LOG_FILTER_BATTLEGROUND, "diff: %u", diff);
+
+            if (diff > 0)
+                (*itr)->Team = moreAli ? ALLIANCE : HORDE;
+
+            bool alliance = (*itr)->Team == ALLIANCE;
+
+            sLog->outDebug(LOG_FILTER_BATTLEGROUND, "Team: %s", alliance ? "ali" : "horde");
+
+            if (m_SelectionPools[alliance ? TEAM_ALLIANCE : TEAM_HORDE].AddGroup((*itr), alliance ? aliFree : hordeFree))
+            {
+                sLog->outDebug(LOG_FILTER_BATTLEGROUND, "Size: %u", (*itr)->Players.size());
+                alliance ? valiFree -= (*itr)->Players.size() : vhordeFree -= (*itr)->Players.size();
+            }
+        }
+        return true;
+    }
+    return false;
 }

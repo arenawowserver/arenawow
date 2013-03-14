@@ -330,7 +330,7 @@ void BattlegroundWS::EventPlayerCapturedFlag(Player* Source)
         SendMessageToAll(LANG_BG_WS_CAPTURED_AF, CHAT_MSG_BG_SYSTEM_HORDE, Source);
 
     UpdateFlagState(Source->GetBGTeam(), 1);                  // flag state none
-    UpdateTeamScore(Source->GetTeamId());
+    UpdateTeamScore(Source->GetBGTeamId());
     // only flag capture should be updated
     UpdatePlayerScore(Source, SCORE_FLAG_CAPTURES, 1);      // +1 flag captures
 

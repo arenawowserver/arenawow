@@ -1010,6 +1010,21 @@ void WorldSession::HandlePlayerLogin(LoginQueryHolder* holder)
 
     sScriptMgr->OnPlayerLogin(pCurrChar);
     delete holder;
+
+    if (sWorld->getBoolConfig(CONFIG_CROSSFACTION_ENABLED))
+    {
+        float x = pCurrChar->GetPositionX();
+        float y = pCurrChar->GetPositionY();
+        float z = pCurrChar->GetPositionZ();
+        if (z+1 < pCurrChar->GetMap()->GetHeight(x, y, MAX_HEIGHT) && pCurrChar->GetMap()->IsOutdoors(x, y, z))
+            pCurrChar->TeleportTo(pCurrChar->m_homebindMapId, pCurrChar->m_homebindX, pCurrChar->m_homebindY, pCurrChar->m_homebindZ, pCurrChar->GetOrientation());
+    }
+
+    if (pCurrChar->GetBattleground() && !pCurrChar->GetBattleground()->isArena())
+        pCurrChar->FitPlayerInTeam(true);
+    else
+        pCurrChar->FitPlayerInTeam(false);
+
 }
 
 void WorldSession::HandleSetFactionAtWar(WorldPacket& recvData)
