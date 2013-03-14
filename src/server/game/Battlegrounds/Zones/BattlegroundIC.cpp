@@ -471,7 +471,7 @@ void BattlegroundIC::HandleKillPlayer(Player* player, Player* killer)
 
     // we must end the battleground
     if (factionReinforcements[player->GetTeamId()] < 1)
-        EndBattleground(killer->GetTeam());
+        EndBattleground(killer->GetBGTeam());
 }
 
 void BattlegroundIC::EndBattleground(uint32 winner)
@@ -882,7 +882,7 @@ void BattlegroundIC::EventPlayerDamagedGO(Player* /*player*/, GameObject* /*go*/
 
 WorldSafeLocsEntry const* BattlegroundIC::GetClosestGraveYard(Player* player)
 {
-    TeamId teamIndex = GetTeamIndexByTeamId(player->GetTeam());
+    TeamId teamIndex = GetTeamIndexByTeamId(player->GetBGTeam());
 
     // Is there any occupied node for this team?
     std::vector<uint8> nodes;
