@@ -5517,6 +5517,9 @@ void Player::RepopAtGraveyard()
     // and don't show spirit healer location
     if (ClosestGrave)
     {
+
+		if (GetZoneId() == 2597 || GetZoneId() == 3358 || GetZoneId() == 3277 || GetZoneId() == 3820 || GetZoneId() == 4384 || GetZoneId() == 4710)
+			TeleportTo(ClosestGrave->map_id, ClosestGrave->x, ClosestGrave->y, ClosestGrave->z, GetOrientation());
         
         if (isDead())                                        // not send if alive, because it used in TeleportTo()
         {
